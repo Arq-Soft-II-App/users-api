@@ -2,50 +2,59 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"time"
 	"users-api/src/client"
 	"users-api/src/dto"
 	"users-api/src/models"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"github.com/go-redis/redis/v8"
+	"github.com/google/uuid"
 )
 
-// UserService define la interfaz que implementará el servicio de usuarios
 type UserService interface {
 	GetAllUsers(ctx context.Context, filter map[string]interface{}) ([]dto.UserResponseDTO, error)
+	GetUserByEmail(ctx context.Context, email string) (*dto.UserResponseDTO, error)
 	GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error)
 	CreateUser(ctx context.Context, createUserDTO *dto.CreateUserDTO) (*dto.UserResponseDTO, error)
 	UpdateUser(ctx context.Context, id string, updateUserDTO *dto.UpdateUserDTO) (*dto.UserResponseDTO, error)
 	DeleteUser(ctx context.Context, id string) error
 }
 
-// userService es la implementación del UserService
 type userService struct {
-	repo client.UserRepository
+	repo        client.UserRepository
+	redisClient *redis.Client
 }
 
-// NewUserService crea una nueva instancia de UserService
-func NewUserService(repo client.UserRepository) UserService {
-	return &userService{repo: repo}
+func NewUserService(repo client.UserRepository, redisClient *redis.Client) UserService {
+	return &userService{repo: repo, redisClient: redisClient}
 }
 
-// GetAllUsers devuelve una lista de usuarios según un filtro
 func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interface{}) ([]dto.UserResponseDTO, error) {
-	// Convierte el filtro map[string]interface{} a bson.M
-	bsonFilter := make(map[string]interface{})
-	for k, v := range filter {
-		bsonFilter[k] = v
+	cacheKey := "all_users"
+	var userResponses []dto.UserResponseDTO
+
+	if s.redisClient != nil {
+		// Intentar obtener de caché
+		cachedUsers, err := s.redisClient.Get(ctx, cacheKey).Result()
+		if err == nil {
+			err = json.Unmarshal([]byte(cachedUsers), &userResponses)
+			if err == nil {
+				return userResponses, nil
+			}
+		}
 	}
 
-	users, err := s.repo.ReadAll(ctx, bsonFilter)
+	// Si no está en caché o Redis no está disponible, obtener de la base de datos
+	users, err := s.repo.ReadAll(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Convertir la lista de usuarios en una lista de DTOs de respuesta
-	var userResponses []dto.UserResponseDTO
 	for _, user := range users {
 		userResponses = append(userResponses, dto.UserResponseDTO{
-			ID:        user.ID.Hex(),
+			ID:        user.ID,
 			Name:      user.Name,
 			Lastname:  user.Lastname,
 			Birthdate: user.Birthdate,
@@ -55,18 +64,36 @@ func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interfa
 		})
 	}
 
+	if s.redisClient != nil {
+		// Guardar en caché
+		usersJSON, _ := json.Marshal(userResponses)
+		s.redisClient.Set(ctx, cacheKey, usersJSON, 5*time.Minute)
+	}
+
 	return userResponses, nil
 }
 
-// GetUserByID devuelve un usuario por su ID
-func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error) {
-	user, err := s.repo.ReadOne(ctx, id)
+func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.UserResponseDTO, error) {
+	cacheKey := fmt.Sprintf("user_email:%s", email)
+
+	// Intentar obtener de caché
+	cachedUser, err := s.redisClient.Get(ctx, cacheKey).Result()
+	if err == nil {
+		var userResponse dto.UserResponseDTO
+		err = json.Unmarshal([]byte(cachedUser), &userResponse)
+		if err == nil {
+			return &userResponse, nil
+		}
+	}
+
+	// Si no está en caché, obtener de la base de datos
+	user, err := s.repo.ReadByEmail(ctx, email)
 	if err != nil {
 		return nil, err
 	}
 
 	userResponse := &dto.UserResponseDTO{
-		ID:        user.ID.Hex(),
+		ID:        user.ID,
 		Name:      user.Name,
 		Lastname:  user.Lastname,
 		Birthdate: user.Birthdate,
@@ -75,10 +102,49 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResp
 		Avatar:    user.Avatar,
 	}
 
+	// Guardar en caché
+	userJSON, _ := json.Marshal(userResponse)
+	s.redisClient.Set(ctx, cacheKey, userJSON, 5*time.Minute)
+
 	return userResponse, nil
 }
 
-// CreateUser crea un nuevo usuario
+func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error) {
+	cacheKey := fmt.Sprintf("user_id:%s", id)
+
+	// Intentar obtener de caché
+	cachedUser, err := s.redisClient.Get(ctx, cacheKey).Result()
+	if err == nil {
+		var userResponse dto.UserResponseDTO
+		err = json.Unmarshal([]byte(cachedUser), &userResponse)
+		if err == nil {
+			return &userResponse, nil
+		}
+	}
+
+	// Si no está en caché, obtener de la base de datos
+	user, err := s.repo.ReadOne(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	userResponse := &dto.UserResponseDTO{
+		ID:        user.ID,
+		Name:      user.Name,
+		Lastname:  user.Lastname,
+		Birthdate: user.Birthdate,
+		Role:      user.Role,
+		Email:     user.Email,
+		Avatar:    user.Avatar,
+	}
+
+	// Guardar en caché
+	userJSON, _ := json.Marshal(userResponse)
+	s.redisClient.Set(ctx, cacheKey, userJSON, 5*time.Minute)
+
+	return userResponse, nil
+}
+
 func (s *userService) CreateUser(ctx context.Context, createUserDTO *dto.CreateUserDTO) (*dto.UserResponseDTO, error) {
 	hashedPassword, err := createUserDTO.ValidateAndHash()
 	if err != nil {
@@ -86,10 +152,10 @@ func (s *userService) CreateUser(ctx context.Context, createUserDTO *dto.CreateU
 	}
 
 	user := &models.User{
-		ID:        primitive.NewObjectID(),
+		ID:        uuid.New().String(),
 		Name:      createUserDTO.Name,
 		Lastname:  createUserDTO.Lastname,
-		Birthdate: createUserDTO.Birthdate, // Convierte a time.Time si es necesario
+		Birthdate: createUserDTO.Birthdate,
 		Role:      createUserDTO.Role,
 		Email:     createUserDTO.Email,
 		Password:  hashedPassword,
@@ -101,19 +167,25 @@ func (s *userService) CreateUser(ctx context.Context, createUserDTO *dto.CreateU
 	}
 
 	userResponse := &dto.UserResponseDTO{
-		ID:        user.ID.Hex(),
+		ID:        user.ID,
 		Name:      user.Name,
 		Lastname:  user.Lastname,
-		Birthdate: user.Birthdate, // Convierte a time.Time si es necesario
+		Birthdate: user.Birthdate,
 		Role:      user.Role,
 		Email:     user.Email,
 		Avatar:    user.Avatar,
 	}
 
+	if s.redisClient != nil {
+		// Invalidar caché
+		s.redisClient.Del(ctx, "all_users")
+		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
+		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))
+	}
+
 	return userResponse, nil
 }
 
-// UpdateUser actualiza un usuario existente
 func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *dto.UpdateUserDTO) (*dto.UserResponseDTO, error) {
 	user, err := s.repo.ReadOne(ctx, id)
 	if err != nil {
@@ -128,7 +200,7 @@ func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *
 		user.Lastname = *updateUserDTO.Lastname
 	}
 	if updateUserDTO.Birthdate != nil {
-		user.Birthdate = *updateUserDTO.Birthdate // Convierte a time.Time si es necesario
+		user.Birthdate = *updateUserDTO.Birthdate
 	}
 	if updateUserDTO.Role != nil {
 		user.Role = *updateUserDTO.Role
@@ -137,11 +209,7 @@ func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *
 		user.Email = *updateUserDTO.Email
 	}
 	if updateUserDTO.Password != nil {
-		hashedPassword, err := updateUserDTO.ValidateAndHashPassword()
-		if err != nil {
-			return nil, err
-		}
-		user.Password = hashedPassword
+		user.Password = *updateUserDTO.Password
 	}
 	if updateUserDTO.Avatar != nil {
 		user.Avatar = *updateUserDTO.Avatar
@@ -152,19 +220,42 @@ func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *
 	}
 
 	userResponse := &dto.UserResponseDTO{
-		ID:        user.ID.Hex(),
+		ID:        user.ID,
 		Name:      user.Name,
 		Lastname:  user.Lastname,
-		Birthdate: user.Birthdate, // Convierte a time.Time si es necesario
+		Birthdate: user.Birthdate,
 		Role:      user.Role,
 		Email:     user.Email,
 		Avatar:    user.Avatar,
 	}
 
+	if s.redisClient != nil {
+		// Invalidar caché
+		s.redisClient.Del(ctx, "all_users")
+		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
+		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))
+	}
+
 	return userResponse, nil
 }
 
-// DeleteUser elimina un usuario existente por su ID
 func (s *userService) DeleteUser(ctx context.Context, id string) error {
-	return s.repo.Delete(ctx, id)
+	user, err := s.repo.ReadOne(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	err = s.repo.Delete(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if s.redisClient != nil {
+		// Invalidar caché
+		s.redisClient.Del(ctx, "all_users")
+		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
+		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))
+	}
+
+	return nil
 }

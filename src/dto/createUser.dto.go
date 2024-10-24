@@ -5,9 +5,12 @@ import (
 	"strings"
 	"time"
 	"users-api/src/utils"
+
+	"github.com/google/uuid"
 )
 
 type CreateUserDTO struct {
+	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name" binding:"required"`
 	Lastname  string    `json:"lastname" binding:"required"`
 	Birthdate time.Time `json:"birthdate" binding:"required"`

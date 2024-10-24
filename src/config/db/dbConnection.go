@@ -1,44 +1,33 @@
 package db
 
 import (
-	"context" // para manejar el contexto de la conexion, incluyendo la cancelacion y los tiempos de espera
-	"log"     // se usa para asegurarse de que el codigo de conexion a la base de datos se ejecute solo una vez
+	"log"
 	"sync"
-	"time"
-
 	"users-api/src/config/envs"
 
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
-var once sync.Once           // variable para asegurarse de que el codigo de conexion a la base de datos se ejecute solo una vez
-var dbInstance *mongo.Client // variable para almacenar la instancia de la base de datos
+var once sync.Once
+var dbInstance *gorm.DB
 
-// conexion con MongoDB utilizando singleton
-func ConnectDB() (*mongo.Client, error) {
+func ConnectDB() (*gorm.DB, error) {
 	var err error
-	env := envs.LoadEnvs(".env")
-	MONGO_URI := env.Get("MONGO_URI")
+	POSTGRES_URI := envs.LoadEnvs(".env").Get("POSTGRES_URI")
 
-	once.Do(func() { // se asegura de que el codigo de conexion a la base de datos se ejecute solo una vez
-		clientOptions := options.Client().ApplyURI(MONGO_URI)
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		dbInstance, err = mongo.Connect(ctx, clientOptions)
+	once.Do(func() {
+		dbInstance, err = gorm.Open(postgres.Open(POSTGRES_URI), &gorm.Config{})
 		if err != nil {
-			log.Fatalf("Error al conectar con MongoDB: %v", err)
+			log.Fatalf("Error al conectar con PostgreSQL: %v", err)
 		}
 
-		// verifica la conexion
-		err = dbInstance.Ping(ctx, nil)
-		if err != nil {
-			log.Fatalf("No se pudo conectar a MongoDB: %v", err)
-		}
+		/* 		err = dbInstance.AutoMigrate(&models.User{})
+		   		if err != nil {
+		   			log.Fatalf("Error al realizar la migración automática: %v", err)
+		   		} */
 
-		log.Println("Conexión a MongoDB establecida")
+		log.Println("Conexión a PostgreSQL establecida")
 	})
 
 	return dbInstance, err

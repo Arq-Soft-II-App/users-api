@@ -34,6 +34,18 @@ func (uc *UserController) GetUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
+func (uc *UserController) GetUserByEmail(c *gin.Context) {
+	email := c.Param("email")
+
+	user, err := uc.service.GetUserByEmail(c.Request.Context(), email)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
 // GetUserByID maneja la solicitud GET /users/:id para obtener un usuario por su ID
 func (uc *UserController) GetUserByID(c *gin.Context) {
 	id := c.Param("id")

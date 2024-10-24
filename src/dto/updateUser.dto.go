@@ -2,7 +2,6 @@ package dto
 
 import (
 	"time"
-	"users-api/src/utils"
 )
 
 type UpdateUserDTO struct {
@@ -13,16 +12,4 @@ type UpdateUserDTO struct {
 	Email     *string    `json:"email,omitempty"`
 	Password  *string    `json:"password,omitempty"`
 	Avatar    *string    `json:"avatar,omitempty"`
-}
-
-// ValidateAndHashPassword hashea la contraseña si es proporcionada
-func (dto *UpdateUserDTO) ValidateAndHashPassword() (string, error) {
-	if dto.Password != nil && *dto.Password != "" {
-		hashedPassword, err := utils.HashPassword(*dto.Password)
-		if err != nil {
-			return "", err
-		}
-		return hashedPassword, nil
-	}
-	return "", nil
 }

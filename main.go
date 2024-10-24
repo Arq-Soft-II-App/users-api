@@ -9,12 +9,7 @@ import (
 func main() {
 	env := envs.LoadEnvs(".env")
 
-	app := builder.NewAppBuilder().
-		BuildDBConnection().
-		BuildUserRepo().
-		BuildUserService().
-		BuildUserController().
-		BuildRouter()
+	app := builder.BuildApp()
 
 	defer app.DisconnectDB()
 

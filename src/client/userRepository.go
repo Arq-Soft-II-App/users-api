@@ -2,104 +2,71 @@ package client
 
 import (
 	"context"
+	"users-api/src/errors"
 	"users-api/src/models"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"net/http"
+
+	"gorm.io/gorm"
 )
 
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
-	ReadAll(ctx context.Context, filter bson.M) ([]models.User, error)
+	ReadAll(ctx context.Context) ([]models.User, error)
+	ReadByEmail(ctx context.Context, email string) (*models.User, error)
 	ReadOne(ctx context.Context, id string) (*models.User, error)
 	Update(ctx context.Context, id string, user *models.User) error
 	Delete(ctx context.Context, id string) error
 }
 
-type mongoUserRepository struct {
-	collection *mongo.Collection
+type gormUserRepository struct {
+	db *gorm.DB
 }
 
-func NewMongoUserRepository(db *mongo.Client) UserRepository {
-	return &mongoUserRepository{
-		collection: db.Database("your_db_name").Collection("users"),
+func NewGormUserRepository(db *gorm.DB) UserRepository {
+	return &gormUserRepository{
+		db: db,
 	}
 }
 
-func (r *mongoUserRepository) Create(ctx context.Context, user *models.User) error {
-	user.ID = primitive.NewObjectID()
-	_, err := r.collection.InsertOne(ctx, user)
-	return err
+func (r *gormUserRepository) Create(ctx context.Context, user *models.User) error {
+	return r.db.WithContext(ctx).Create(user).Error
 }
 
-func (r *mongoUserRepository) ReadAll(ctx context.Context, filter bson.M) ([]models.User, error) {
+func (r *gormUserRepository) ReadAll(ctx context.Context) ([]models.User, error) {
 	var users []models.User
-	cur, err := r.collection.Find(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	for cur.Next(ctx) {
-		var user models.User
-		err := cur.Decode(&user)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, user)
-	}
-
-	if err := cur.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
+	err := r.db.WithContext(ctx).Find(&users).Error
+	return users, err
 }
 
-func (r *mongoUserRepository) ReadOne(ctx context.Context, id string) (*models.User, error) {
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
+func (r *gormUserRepository) ReadByEmail(ctx context.Context, email string) (*models.User, error) {
 	var user models.User
-	err = r.collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&user)
+	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
 	if err != nil {
-		return nil, err
+		if err == gorm.ErrRecordNotFound {
+			return nil, errors.NewError("NOT_FOUND", "Usuario no encontrado", http.StatusNotFound)
+		}
+		return nil, errors.NewError("DB_ERROR", "Error al recuperar el usuario de la base de datos", http.StatusInternalServerError)
 	}
-
 	return &user, nil
 }
 
-func (r *mongoUserRepository) Update(ctx context.Context, id string, user *models.User) error {
-	objectID, err := primitive.ObjectIDFromHex(id)
+func (r *gormUserRepository) ReadOne(ctx context.Context, id string) (*models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error
 	if err != nil {
-		return err
+		if err == gorm.ErrRecordNotFound {
+			return nil, errors.NewError("NOT_FOUND", "Usuario no encontrado", http.StatusNotFound)
+		}
+		return nil, errors.NewError("DB_ERROR", "Error al recuperar el usuario de la base de datos", http.StatusInternalServerError)
 	}
-
-	update := bson.M{
-		"$set": bson.M{
-			"name":      user.Name,
-			"lastname":  user.Lastname,
-			"birthdate": user.Birthdate,
-			"role":      user.Role,
-			"email":     user.Email,
-			"password":  user.Password,
-			"avatar":    user.Avatar,
-		},
-	}
-
-	_, err = r.collection.UpdateByID(ctx, objectID, update)
-	return err
+	return &user, nil
 }
 
-func (r *mongoUserRepository) Delete(ctx context.Context, id string) error {
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
+func (r *gormUserRepository) Update(ctx context.Context, id string, user *models.User) error {
+	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).Updates(user).Error
+}
 
-	_, err = r.collection.DeleteOne(ctx, bson.M{"_id": objectID})
-	return err
+func (r *gormUserRepository) Delete(ctx context.Context, id string) error {
+	return r.db.WithContext(ctx).Delete(&models.User{}, "id = ?", id).Error
 }
