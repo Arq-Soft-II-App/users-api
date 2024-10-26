@@ -27,5 +27,6 @@ func SetupRoutes(router *gin.Engine, userController *controllers.UserController,
 	// Handler para rutas no encontradas
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ruta no encontrada"})
+
 	})
 }
