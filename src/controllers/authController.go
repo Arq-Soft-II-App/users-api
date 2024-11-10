@@ -7,14 +7,19 @@ import (
 	"users-api/src/services"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type AuthController struct {
 	service services.AuthService
+	logger  *zap.Logger
 }
 
-func NewAuthController(service services.AuthService) *AuthController {
-	return &AuthController{service: service}
+func NewAuthController(service services.AuthService, logger *zap.Logger) *AuthController {
+	return &AuthController{
+		service: service,
+		logger:  logger,
+	}
 }
 
 func (ac *AuthController) Login(c *gin.Context) {

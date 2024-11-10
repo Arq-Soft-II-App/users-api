@@ -1,20 +1,24 @@
 package controllers
 
 import (
-	"log"
 	"net/http"
 	"users-api/src/dto"
 	"users-api/src/services"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type UserController struct {
 	service services.UserService
+	logger  *zap.Logger
 }
 
-func NewUserController(service services.UserService) *UserController {
-	return &UserController{service: service}
+func NewUserController(service services.UserService, logger *zap.Logger) *UserController {
+	return &UserController{
+		service: service,
+		logger:  logger,
+	}
 }
 
 // GetUsers maneja la solicitud GET /users/ para obtener todos los usuarios o aplicar un filtro
@@ -63,7 +67,7 @@ func (uc *UserController) GetUserByID(c *gin.Context) {
 func (uc *UserController) CreateUser(c *gin.Context) {
 	var createUserDTO dto.CreateUserDTO
 	if err := c.ShouldBindJSON(&createUserDTO); err != nil {
-		log.Fatal(err)
+		uc.logger.Error("Error al procesar datos de usuario", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos"})
 		return
 	}

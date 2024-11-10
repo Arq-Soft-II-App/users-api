@@ -12,6 +12,7 @@ import (
 	"users-api/src/utils"
 
 	"github.com/go-redis/redis/v8"
+	"go.uber.org/zap"
 )
 
 type AuthService interface {
@@ -21,10 +22,15 @@ type AuthService interface {
 type authService struct {
 	repo        client.UserRepository
 	redisClient *redis.Client
+	logger      *zap.Logger
 }
 
-func NewAuthService(repo client.UserRepository, redisClient *redis.Client) AuthService {
-	return &authService{repo: repo, redisClient: redisClient}
+func NewAuthService(repo client.UserRepository, redisClient *redis.Client, logger *zap.Logger) AuthService {
+	return &authService{
+		repo:        repo,
+		redisClient: redisClient,
+		logger:      logger,
+	}
 }
 
 func (s *authService) Login(ctx context.Context, loginDTO *dto.LoginDTO) (*dto.UserResponseDTO, error) {

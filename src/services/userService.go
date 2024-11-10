@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 type UserService interface {
@@ -25,10 +26,15 @@ type UserService interface {
 type userService struct {
 	repo        client.UserRepository
 	redisClient *redis.Client
+	logger      *zap.Logger
 }
 
-func NewUserService(repo client.UserRepository, redisClient *redis.Client) UserService {
-	return &userService{repo: repo, redisClient: redisClient}
+func NewUserService(repo client.UserRepository, redisClient *redis.Client, logger *zap.Logger) UserService {
+	return &userService{
+		repo:        repo,
+		redisClient: redisClient,
+		logger:      logger,
+	}
 }
 
 func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interface{}) ([]dto.UserResponseDTO, error) {
@@ -36,9 +42,9 @@ func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interfa
 	var userResponses []dto.UserResponseDTO
 
 	if s.redisClient != nil {
-		// Intentar obtener de caché
 		cachedUsers, err := s.redisClient.Get(ctx, cacheKey).Result()
 		if err == nil {
+			s.logger.Info("Usuarios obtenidos desde caché")
 			err = json.Unmarshal([]byte(cachedUsers), &userResponses)
 			if err == nil {
 				return userResponses, nil
@@ -46,7 +52,6 @@ func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interfa
 		}
 	}
 
-	// Si no está en caché o Redis no está disponible, obtener de la base de datos
 	users, err := s.repo.ReadAll(ctx)
 	if err != nil {
 		return nil, err
@@ -65,7 +70,6 @@ func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interfa
 	}
 
 	if s.redisClient != nil {
-		// Guardar en caché
 		usersJSON, _ := json.Marshal(userResponses)
 		s.redisClient.Set(ctx, cacheKey, usersJSON, 5*time.Minute)
 	}
@@ -76,7 +80,6 @@ func (s *userService) GetAllUsers(ctx context.Context, filter map[string]interfa
 func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.UserResponseDTO, error) {
 	cacheKey := fmt.Sprintf("user_email:%s", email)
 
-	// Intentar obtener de caché
 	cachedUser, err := s.redisClient.Get(ctx, cacheKey).Result()
 	if err == nil {
 		var userResponse dto.UserResponseDTO
@@ -86,7 +89,6 @@ func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.Us
 		}
 	}
 
-	// Si no está en caché, obtener de la base de datos
 	user, err := s.repo.ReadByEmail(ctx, email)
 	if err != nil {
 		return nil, err
@@ -102,7 +104,6 @@ func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.Us
 		Avatar:    user.Avatar,
 	}
 
-	// Guardar en caché
 	userJSON, _ := json.Marshal(userResponse)
 	s.redisClient.Set(ctx, cacheKey, userJSON, 5*time.Minute)
 
@@ -112,7 +113,6 @@ func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.Us
 func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error) {
 	cacheKey := fmt.Sprintf("user_id:%s", id)
 
-	// Intentar obtener de caché
 	cachedUser, err := s.redisClient.Get(ctx, cacheKey).Result()
 	if err == nil {
 		var userResponse dto.UserResponseDTO
@@ -122,7 +122,6 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResp
 		}
 	}
 
-	// Si no está en caché, obtener de la base de datos
 	user, err := s.repo.ReadOne(ctx, id)
 	if err != nil {
 		return nil, err
@@ -138,7 +137,6 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResp
 		Avatar:    user.Avatar,
 	}
 
-	// Guardar en caché
 	userJSON, _ := json.Marshal(userResponse)
 	s.redisClient.Set(ctx, cacheKey, userJSON, 5*time.Minute)
 
@@ -177,7 +175,6 @@ func (s *userService) CreateUser(ctx context.Context, createUserDTO *dto.CreateU
 	}
 
 	if s.redisClient != nil {
-		// Invalidar caché
 		s.redisClient.Del(ctx, "all_users")
 		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
 		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))
@@ -192,7 +189,6 @@ func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *
 		return nil, err
 	}
 
-	// Actualizar solo los campos que están presentes en el DTO
 	if updateUserDTO.Name != nil {
 		user.Name = *updateUserDTO.Name
 	}
@@ -230,7 +226,6 @@ func (s *userService) UpdateUser(ctx context.Context, id string, updateUserDTO *
 	}
 
 	if s.redisClient != nil {
-		// Invalidar caché
 		s.redisClient.Del(ctx, "all_users")
 		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
 		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))
@@ -251,7 +246,6 @@ func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	}
 
 	if s.redisClient != nil {
-		// Invalidar caché
 		s.redisClient.Del(ctx, "all_users")
 		s.redisClient.Del(ctx, fmt.Sprintf("user_email:%s", user.Email))
 		s.redisClient.Del(ctx, fmt.Sprintf("user_id:%s", user.ID))

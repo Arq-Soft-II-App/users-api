@@ -1,9 +1,9 @@
 package builder
 
 import (
-	"log"
 	"users-api/src/client"
 	"users-api/src/config/db"
+	"users-api/src/config/log"
 	"users-api/src/config/redis"
 	"users-api/src/controllers"
 	"users-api/src/router"
@@ -11,12 +11,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	redisClient "github.com/go-redis/redis/v8"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 type AppBuilder struct {
 	db             *gorm.DB
 	redisClient    *redisClient.Client
+	Logger         *zap.Logger
 	userRepo       client.UserRepository
 	userService    services.UserService
 	authService    services.AuthService
@@ -31,6 +33,7 @@ func NewAppBuilder() *AppBuilder {
 
 func BuildApp() *AppBuilder {
 	return NewAppBuilder().
+		BuildLogger().
 		BuildDBConnection().
 		BuildUserRepo().
 		BuildUserService().
@@ -38,15 +41,21 @@ func BuildApp() *AppBuilder {
 		BuildRouter()
 }
 
+func (b *AppBuilder) BuildLogger() *AppBuilder {
+	b.Logger = log.GetLogger()
+	b.Logger.Info("[USERS-API] Logger inicializado")
+	return b
+}
+
 func (b *AppBuilder) BuildDBConnection() *AppBuilder {
 	var err error
-	b.db, err = db.ConnectDB()
+	b.db, err = db.ConnectDB(b.Logger)
 	if err != nil {
-		log.Fatalf("Error al conectar a la base de datos: %v", err)
+		b.Logger.Fatal("[USERS-API] Error al conectar a la base de datos", zap.Error(err))
 	}
 	b.redisClient = redis.ConnectRedis()
 	if b.redisClient == nil {
-		log.Println("Redis no está disponible. La aplicación funcionará sin caché.")
+		b.Logger.Warn("[USERS-API] Redis no está disponible. La aplicación funcionará sin caché.")
 	}
 	return b
 }
@@ -55,40 +64,44 @@ func (b *AppBuilder) DisconnectDB() {
 	if b.db != nil {
 		sqlDB, err := b.db.DB()
 		if err != nil {
-			log.Printf("Error al obtener la conexión SQL: %v", err)
+			b.Logger.Error("[USERS-API] Error al obtener la conexión SQL", zap.Error(err))
 		} else {
 			if err := sqlDB.Close(); err != nil {
-				log.Printf("Error al desconectar de la base de datos: %v", err)
+				b.Logger.Error("[USERS-API] Error al desconectar de la base de datos", zap.Error(err))
+			} else {
+				b.Logger.Info("[USERS-API] Conexión a la base de datos cerrada")
 			}
 		}
 	}
-	if b.redisClient != nil {
-		if err := b.redisClient.Close(); err != nil {
-			log.Printf("Error al cerrar la conexión de Redis: %v", err)
-		}
-	}
+	_ = b.Logger.Sync()
 }
 
 func (b *AppBuilder) BuildUserRepo() *AppBuilder {
 	b.userRepo = client.NewGormUserRepository(b.db)
+	b.Logger.Info("[USERS-API] Repositorio de usuarios inicializado")
 	return b
 }
 
 func (b *AppBuilder) BuildUserService() *AppBuilder {
-	b.userService = services.NewUserService(b.userRepo, b.redisClient)
-	b.authService = services.NewAuthService(b.userRepo, b.redisClient)
+	b.userService = services.NewUserService(b.userRepo, b.redisClient, b.Logger)
+	b.Logger.Info("[USERS-API] Servicio de usuarios inicializado")
+	b.authService = services.NewAuthService(b.userRepo, b.redisClient, b.Logger)
+	b.Logger.Info("[USERS-API] Servicio de autenticación inicializado")
 	return b
 }
 
 func (b *AppBuilder) BuildUserController() *AppBuilder {
-	b.userController = controllers.NewUserController(b.userService)
-	b.authController = controllers.NewAuthController(b.authService)
+	b.userController = controllers.NewUserController(b.userService, b.Logger)
+	b.Logger.Info("[USERS-API] Controlador de usuarios inicializado")
+	b.authController = controllers.NewAuthController(b.authService, b.Logger)
+	b.Logger.Info("[USERS-API] Controlador de autenticación inicializado")
 	return b
 }
 
 func (b *AppBuilder) BuildRouter() *AppBuilder {
 	b.router = gin.Default()
 	router.SetupRoutes(b.router, b.userController, b.authController)
+	b.Logger.Info("[USERS-API] Rutas configuradas")
 	return b
 }
 
