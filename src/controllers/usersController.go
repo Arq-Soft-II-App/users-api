@@ -38,6 +38,31 @@ func (uc *UserController) GetUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
+func (uc *UserController) GetUsersList(c *gin.Context) {
+	var requestBody struct {
+		IDs []string `json:"ids" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		uc.logger.Error("Error al procesar los IDs", zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Los IDs son requeridos y deben ser un array de strings"})
+		return
+	}
+
+	if len(requestBody.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "La lista de IDs no puede estar vacía"})
+		return
+	}
+
+	users, err := uc.service.GetUsersList(c.Request.Context(), requestBody.IDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener usuarios"})
+		return
+	}
+
+	c.JSON(http.StatusOK, users)
+}
+
 func (uc *UserController) GetUserByEmail(c *gin.Context) {
 	email := c.Param("email")
 

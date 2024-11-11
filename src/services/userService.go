@@ -18,6 +18,7 @@ type UserService interface {
 	GetAllUsers(ctx context.Context, filter map[string]interface{}) ([]dto.UserResponseDTO, error)
 	GetUserByEmail(ctx context.Context, email string) (*dto.UserResponseDTO, error)
 	GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error)
+	GetUsersList(ctx context.Context, ids []string) ([]dto.UserResponseDTO, error)
 	CreateUser(ctx context.Context, createUserDTO *dto.CreateUserDTO) (*dto.UserResponseDTO, error)
 	UpdateUser(ctx context.Context, id string, updateUserDTO *dto.UpdateUserDTO) (*dto.UserResponseDTO, error)
 	DeleteUser(ctx context.Context, id string) error
@@ -108,6 +109,28 @@ func (s *userService) GetUserByEmail(ctx context.Context, email string) (*dto.Us
 	s.redisClient.Set(ctx, cacheKey, userJSON, 5*time.Minute)
 
 	return userResponse, nil
+}
+
+func (s *userService) GetUsersList(ctx context.Context, ids []string) ([]dto.UserResponseDTO, error) {
+	users, err := s.repo.GetUsersList(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	var userResponses []dto.UserResponseDTO
+	for _, user := range users {
+		userResponses = append(userResponses, dto.UserResponseDTO{
+			ID:        user.ID,
+			Name:      user.Name,
+			Lastname:  user.Lastname,
+			Birthdate: user.Birthdate,
+			Role:      user.Role,
+			Email:     user.Email,
+			Avatar:    user.Avatar,
+		})
+	}
+
+	return userResponses, nil
 }
 
 func (s *userService) GetUserByID(ctx context.Context, id string) (*dto.UserResponseDTO, error) {

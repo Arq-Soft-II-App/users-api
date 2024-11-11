@@ -17,6 +17,7 @@ func SetupRoutes(router *gin.Engine, userController *controllers.UserController,
 	{
 		userRoutes.GET("/", userController.GetUsers)
 		userRoutes.GET("/email/:email", userController.GetUserByEmail)
+		userRoutes.GET("/list", userController.GetUsersList)
 		userRoutes.GET("/:id", userController.GetUserByID)
 		userRoutes.POST("/", userController.CreateUser)
 		userRoutes.POST("/login", authController.Login)
