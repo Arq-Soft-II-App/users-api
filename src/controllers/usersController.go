@@ -91,6 +91,7 @@ func (uc *UserController) GetUserByID(c *gin.Context) {
 // CreateUser maneja la solicitud POST /users/ para crear un nuevo usuario
 func (uc *UserController) CreateUser(c *gin.Context) {
 	var createUserDTO dto.CreateUserDTO
+
 	if err := c.ShouldBindJSON(&createUserDTO); err != nil {
 		uc.logger.Error("Error al procesar datos de usuario", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos"})
