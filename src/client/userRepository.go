@@ -2,11 +2,9 @@ package client
 
 import (
 	"context"
-	"users-api/src/errors"
 	"users-api/src/models"
 
-	"net/http"
-
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -20,69 +18,128 @@ type UserRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
-type gormUserRepository struct {
-	db *gorm.DB
+type userRepository struct {
+	db     *gorm.DB
+	logger *zap.Logger
 }
 
-func NewGormUserRepository(db *gorm.DB) UserRepository {
-	return &gormUserRepository{
-		db: db,
+func NewUserRepository(db *gorm.DB, logger *zap.Logger) UserRepository {
+	return &userRepository{
+		db:     db,
+		logger: logger,
 	}
 }
 
-func (r *gormUserRepository) Create(ctx context.Context, user *models.User) error {
-	return r.db.WithContext(ctx).Create(user).Error
+func (r *userRepository) Create(ctx context.Context, user *models.User) error {
+	r.logger.Info("[USERS-API][Repository]: Iniciando creación de usuario en BD",
+		zap.String("email", user.Email))
+
+	if err := r.db.Create(user).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al crear usuario en BD",
+			zap.String("email", user.Email),
+			zap.Error(err))
+		return err
+	}
+
+	r.logger.Info("[USERS-API][Repository]: Usuario creado exitosamente en BD",
+		zap.String("id", user.ID))
+	return nil
 }
 
-func (r *gormUserRepository) ReadAll(ctx context.Context) ([]models.User, error) {
+func (r *userRepository) ReadAll(ctx context.Context) ([]models.User, error) {
+	r.logger.Info("[USERS-API][Repository]: Iniciando búsqueda de todos los usuarios en BD")
+
 	var users []models.User
-	err := r.db.WithContext(ctx).Find(&users).Error
-	return users, err
-}
-
-func (r *gormUserRepository) GetUsersList(ctx context.Context, ids []string) ([]models.User, error) {
-	var users []models.User
-	result := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&users)
-
-	if result.Error != nil {
-		return nil, errors.NewError("DB_ERROR", "Error al recuperar los usuarios de la base de datos", http.StatusInternalServerError)
+	if err := r.db.Find(&users).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al obtener todos los usuarios de BD",
+			zap.Error(err))
+		return nil, err
 	}
 
-	if len(users) != len(ids) {
-		return nil, errors.NewError("NOT_FOUND", "No se encontraron todos los usuarios solicitados", http.StatusNotFound)
-	}
-
+	r.logger.Info("[USERS-API][Repository]: Usuarios obtenidos exitosamente de BD",
+		zap.Int("count", len(users)))
 	return users, nil
 }
 
-func (r *gormUserRepository) ReadByEmail(ctx context.Context, email string) (*models.User, error) {
-	var user models.User
-	err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, errors.NewError("NOT_FOUND", "Usuario no encontrado", http.StatusNotFound)
-		}
-		return nil, errors.NewError("DB_ERROR", "Error al recuperar el usuario de la base de datos", http.StatusInternalServerError)
+func (r *userRepository) GetUsersList(ctx context.Context, ids []string) ([]models.User, error) {
+	r.logger.Info("[USERS-API][Repository]: Buscando lista de usuarios por IDs en BD",
+		zap.Strings("ids", ids))
+
+	var users []models.User
+	if err := r.db.Where("id IN ?", ids).Find(&users).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al obtener lista de usuarios de BD",
+			zap.Strings("ids", ids),
+			zap.Error(err))
+		return nil, err
 	}
+
+	r.logger.Info("[USERS-API][Repository]: Lista de usuarios obtenida exitosamente de BD",
+		zap.Int("count", len(users)))
+	return users, nil
+}
+
+func (r *userRepository) ReadByEmail(ctx context.Context, email string) (*models.User, error) {
+	r.logger.Info("[USERS-API][Repository]: Buscando usuario por email en BD",
+		zap.String("email", email))
+
+	var user models.User
+	if err := r.db.First(&user, "email = ?", email).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al buscar usuario por email en BD",
+			zap.String("email", email),
+			zap.Error(err))
+		return nil, err
+	}
+
+	r.logger.Info("[USERS-API][Repository]: Usuario encontrado exitosamente en BD",
+		zap.String("email", email))
 	return &user, nil
 }
 
-func (r *gormUserRepository) ReadOne(ctx context.Context, id string) (*models.User, error) {
+func (r *userRepository) ReadOne(ctx context.Context, id string) (*models.User, error) {
+	r.logger.Info("[USERS-API][Repository]: Buscando usuario por ID en BD",
+		zap.String("id", id))
+
 	var user models.User
-	err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, errors.NewError("NOT_FOUND", "Usuario no encontrado", http.StatusNotFound)
-		}
-		return nil, errors.NewError("DB_ERROR", "Error al recuperar el usuario de la base de datos", http.StatusInternalServerError)
+	if err := r.db.First(&user, "id = ?", id).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al buscar usuario por ID en BD",
+			zap.String("id", id),
+			zap.Error(err))
+		return nil, err
 	}
+
+	r.logger.Info("[USERS-API][Repository]: Usuario encontrado exitosamente en BD",
+		zap.String("id", id))
 	return &user, nil
 }
 
-func (r *gormUserRepository) Update(ctx context.Context, id string, user *models.User) error {
-	return r.db.WithContext(ctx).Model(&models.User{}).Where("id = ?", id).Updates(user).Error
+func (r *userRepository) Update(ctx context.Context, id string, user *models.User) error {
+	r.logger.Info("[USERS-API][Repository]: Iniciando actualización de usuario en BD",
+		zap.String("id", id))
+
+	if err := r.db.Where("id = ?", id).Updates(user).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al actualizar usuario en BD",
+			zap.String("id", id),
+			zap.Error(err))
+		return err
+	}
+
+	r.logger.Info("[USERS-API][Repository]: Usuario actualizado exitosamente en BD",
+		zap.String("id", id))
+	return nil
 }
 
-func (r *gormUserRepository) Delete(ctx context.Context, id string) error {
-	return r.db.WithContext(ctx).Delete(&models.User{}, "id = ?", id).Error
+func (r *userRepository) Delete(ctx context.Context, id string) error {
+	r.logger.Info("[USERS-API][Repository]: Iniciando eliminación de usuario en BD",
+		zap.String("id", id))
+
+	if err := r.db.Delete(&models.User{}, "id = ?", id).Error; err != nil {
+		r.logger.Error("[USERS-API][Repository]: Error al eliminar usuario en BD",
+			zap.String("id", id),
+			zap.Error(err))
+		return err
+	}
+
+	r.logger.Info("[USERS-API][Repository]: Usuario eliminado exitosamente de BD",
+		zap.String("id", id))
+	return nil
 }

@@ -77,7 +77,7 @@ func (b *AppBuilder) DisconnectDB() {
 }
 
 func (b *AppBuilder) BuildUserRepo() *AppBuilder {
-	b.userRepo = client.NewGormUserRepository(b.db)
+	b.userRepo = client.NewUserRepository(b.db, b.Logger)
 	b.Logger.Info("[USERS-API] Repositorio de usuarios inicializado")
 	return b
 }
